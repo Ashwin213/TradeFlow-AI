@@ -12,11 +12,3 @@ I created TradeFlow to offload the repetitive parts of my trading routine. Inste
 
 System Architecture
 The project uses a Hub-and-Spoke pattern. A central coordinator (Gemini 2.0) takes my natural language queries and delegates them to specialized Python agents.
-
-```mermaid
-graph TD
-    User --> Coordinator[Coordinator (Gemini 2.0)]
-    Coordinator --> Monitor[Market Monitor (Parallel)]
-    Coordinator --> News[News Sentinel (LLM)]
-    Coordinator --> Risk[Risk Manager (Sequential)]
-    Coordinator --> Signal[Signal Generator (Loop)]
