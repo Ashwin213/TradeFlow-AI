@@ -1,0 +1,16 @@
+from typing import List
+from adk import Agent
+from adk.models import GeminiModel
+from adk.tools import Tool
+
+class NewsSentinelAgent:
+    def __init__(self, model: GeminiModel, tools: List[Tool]):
+        self.agent = Agent(
+            name="NewsSentinel",
+            model=model,
+            tools=tools,
+            system_prompt="""You are a News Sentinel. 
+            Analyze financial news for sentiment (Bullish/Bearish/Neutral) and impact score (1-10).
+            Focus on NAS100, US30, and US Tech stocks.
+            """
+        )

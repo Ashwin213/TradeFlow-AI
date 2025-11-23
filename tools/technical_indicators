@@ -1,0 +1,15 @@
+from adk.tools import Tool
+
+class TechnicalIndicatorTool(Tool):
+    def __init__(self):
+        super().__init__(
+            name="calculate_indicators",
+            description="Calculates RSI, MACD, and EMA for a ticker."
+        )
+
+    def run(self, ticker: str) -> dict:
+        return {
+            "RSI": 55.4,
+            "MACD": "Bullish Crossover",
+            "EMA_200": "Price is above 200 EMA"
+        }

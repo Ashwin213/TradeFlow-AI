@@ -1,0 +1,18 @@
+from adk.tools import Tool
+
+class RiskCalculatorTool(Tool):
+    def __init__(self):
+        super().__init__(
+            name="calculate_risk_metrics",
+            description="Calculates position size and risk metrics."
+        )
+
+    def run(self, account_size: float, risk_pct: float, stop_loss_dist: float) -> dict:
+        risk_amount = account_size * (risk_pct / 100)
+        # Assuming 1 contract moves $20 per point (NQ standard)
+        position_size = risk_amount / (stop_loss_dist * 20)
+        return {
+            "risk_amount": risk_amount,
+            "recommended_position_size": round(position_size, 2),
+            "units": "Contracts"
+        }

@@ -1,0 +1,136 @@
+from typing import List, Dict, Any
+from adk import Agent, SequentialAgent
+from adk.tools import Tool
+
+
+class RiskManagerAgent:
+    """
+    Sequential agent that performs risk calculations in order:
+    1. Position Size Calculator (calculates how many contracts/shares)
+    2. Stop Loss Optimizer (determines optimal stop loss level)
+    3. Portfolio Exposure Analyzer (evaluates overall portfolio risk)
+    
+    Each agent uses output from the previous agent.
+    """
+    
+    def __init__(self, tools: List[Tool]):
+        """Initialize the sequential risk management agent."""
+        
+        # Sub-agent 1: Calculate position size
+        self.position_calculator = Agent(
+            name="PositionSizeCalculator",
+            tools=tools,
+            system_prompt="""You calculate position sizing for trades.
+
+**Inputs required:**
+- Account size
+- Risk percentage (e.g., 1%, 2%)
+- Entry price
+- Stop loss price
+
+**Formula:**
+Position Size = (Account Size × Risk %) / (Entry Price - Stop Loss Price)
+
+**Output format:**
+- Position size in contracts/shares
+- Dollar risk amount
+- Percentage of account
+
+Use the risk_calculator tool. Be precise with numbers."""
+        )
+        
+        # Sub-agent 2: Optimize stop loss (uses position size from agent 1)
+        self.stop_loss_optimizer = Agent(
+            name="StopLossOptimizer",
+            tools=tools,
+            system_prompt="""You optimize stop loss placement based on:
+
+**Inputs (from previous agent):**
+- Position size
+- Entry price
+- Account risk tolerance
+
+**Analysis:**
+- Technical levels (support/resistance)
+- ATR-based stops
+- Percentage-based stops
+- Dollar amount at risk
+
+**Output:**
+- Recommended stop loss price
+- Distance in points/dollars
+- Risk/reward ratio potential
+
+Use technical_indicators tool for ATR."""
+        )
+        
+        # Sub-agent 3: Analyze portfolio exposure (uses all previous data)
+        self.exposure_analyzer = Agent(
+            name="PortfolioExposureAnalyzer",
+            tools=tools,
+            system_prompt="""You analyze overall portfolio risk.
+
+**Inputs (from previous agents):**
+- Proposed position size
+- Stop loss level
+- Current positions (from session memory)
+
+**Analysis:**
+- Total portfolio risk percentage
+- Sector concentration
+- Correlated positions
+- Margin usage
+
+**Output:**
+- Go/No-Go recommendation
+- Risk warnings if over-leveraged
+- Diversification suggestions
+
+Be conservative in risk assessment."""
+        )
+        
+        # Create the sequential agent (agents execute in order)
+        self.agent = SequentialAgent(
+            name="RiskManager",
+            agents=[
+                self.position_calculator,
+                self.stop_loss_optimizer,
+                self.exposure_analyzer
+            ],
+            system_prompt="""You manage trading risk through sequential analysis.
+
+Execute agents in order:
+1. Calculate position size
+2. Optimize stop loss
+3. Analyze portfolio exposure
+
+Each step uses outputs from previous steps."""
+        )
+    
+    def calculate_risk(self, 
+                      account_size: float,
+                      risk_pct: float,
+                      entry_price: float,
+                      stop_loss: float = None) -> Dict[str, Any]:
+        """
+        Calculate complete risk analysis through sequential agent execution.
+        """
+        
+        # Build the query for sequential execution
+        query = f"""
+        Calculate trading risk for:
+        - Account Size: ${account_size:,.2f}
+        - Risk Per Trade: {risk_pct*100:.1f}%
+        - Entry Price: {entry_price}
+        - Stop Loss: {stop_loss if stop_loss else 'To be determined'}
+        """
+        
+        # Run sequential agent (each agent waits for previous to complete)
+        result = self.agent.run(query)
+        
+        return {
+            "position_size": result.metadata.get("position_size"),
+            "stop_loss": result.metadata.get("stop_loss"),
+            "portfolio_risk": result.metadata.get("portfolio_risk"),
+            "recommendation": result.content
+        }

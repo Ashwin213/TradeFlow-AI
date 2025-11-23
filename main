@@ -1,0 +1,278 @@
+import os
+import sys
+from typing import Dict, Any, List
+import asyncio
+from datetime import datetime
+
+# ADK Imports
+from adk import Agent, Session, InMemorySessionService, MemoryBank
+from adk.models import GeminiModel
+from adk.tools import GoogleSearch, CodeExecution, Tool
+
+# Custom imports
+from agents.market_monitor import MarketMonitorAgent
+from agents.news_sentinel import NewsSentinelAgent
+from agents.risk_manager import RiskManagerAgent
+from agents.signal_generator import SignalGeneratorAgent
+from tools.market_data_tool import MarketDataTool
+from tools.sentiment_tool import SentimentTool
+from tools.technical_indicators import TechnicalIndicatorTool
+from tools.risk_calculator import RiskCalculatorTool
+from services.session_manager import SessionManager
+from services.observability import ObservabilityService
+
+# Initialize observability
+logger = ObservabilityService.get_logger(__name__)
+metrics = ObservabilityService.get_metrics()
+
+
+class TradeFlowCoordinator:
+    """
+    Main Coordinator Agent - Orchestrates all sub-agents
+    
+    This agent uses Gemini 2.0 Flash to understand user queries and
+    delegate tasks to specialized sub-agents based on intent.
+    """
+    
+    def __init__(self, api_key: str):
+        """Initialize the coordinator with all sub-agents and tools."""
+        
+        logger.info("Initializing TradeFlow Coordinator...")
+        
+        # Initialize Gemini model
+        self.model = GeminiModel(
+            api_key=api_key,
+            model_name="gemini-2.0-flash",
+            temperature=0.3,  # Lower temperature for more deterministic trading advice
+            max_tokens=2048
+        )
+        
+        # Initialize session management with memory
+        self.session_service = InMemorySessionService()
+        self.memory_bank = MemoryBank(
+            storage_path="./memory/user_preferences.json"
+        )
+        
+        # Initialize all custom tools
+        self.tools = self._initialize_tools()
+        
+        # Initialize sub-agents
+        self.market_monitor = MarketMonitorAgent(self.model, self.tools)
+        # Note: Ensure NewsSentinelAgent is implemented in agents/news_sentinel.py
+        self.news_sentinel = NewsSentinelAgent(self.model, self.tools)
+        self.risk_manager = RiskManagerAgent(self.tools)
+        self.signal_generator = SignalGeneratorAgent(self.tools)
+        
+        # Initialize the main coordinator agent
+        self.coordinator = Agent(
+            name="TradeFlowCoordinator",
+            model=self.model,
+            tools=self.tools,
+            system_prompt=self._get_system_prompt(),
+            sub_agents=[
+                self.market_monitor.agent,
+                self.news_sentinel.agent,
+                self.risk_manager.agent,
+                self.signal_generator.agent
+            ]
+        )
+        
+        logger.info("✅ TradeFlow Coordinator initialized successfully")
+    
+    def _initialize_tools(self) -> List[Tool]:
+        """Initialize all tools available to agents."""
+        
+        logger.info("Initializing tools...")
+        
+        tools = [
+            # Custom trading tools
+            MarketDataTool(api_key=os.getenv("MARKET_DATA_API_KEY")),
+            SentimentTool(),
+            TechnicalIndicatorTool(),
+            RiskCalculatorTool(),
+            
+            # Built-in ADK tools
+            GoogleSearch(api_key=os.getenv("GOOGLE_SEARCH_API_KEY")),
+            CodeExecution()
+        ]
+        
+        logger.info(f"✅ Initialized {len(tools)} tools")
+        return tools
+    
+    def _get_system_prompt(self) -> str:
+        """System prompt for the coordinator agent."""
+        
+        return """You are TradeFlow AI, an expert trading analysis system.
+
+Your role is to coordinate specialized sub-agents to provide comprehensive trading analysis.
+
+**Available Sub-Agents:**
+
+1. **Market Monitor Agent** - Real-time market data, price movements, volume analysis
+   - Use for: "What's the price of...", "How's the market...", "Show me volume..."
+
+2. **News Sentinel Agent** - News analysis, sentiment scoring, event detection
+   - Use for: "What's the news on...", "Market sentiment...", "Any events affecting..."
+
+3. **Risk Manager Agent** - Position sizing, stop-loss calculations, portfolio risk
+   - Use for: "Calculate position size...", "What stop loss...", "Risk assessment..."
+
+4. **Signal Generator Agent** - Technical analysis, trade setups, entry/exit signals
+   - Use for: "Find trade signals...", "Any setups on...", "Technical analysis of..."
+
+**Guidelines:**
+- Always acknowledge the user's query and indicate which agents you're activating
+- Provide clear, actionable information
+- Include specific numbers (prices, percentages, levels)
+- Warn about risks when appropriate
+- Remember user preferences using memory (risk tolerance, favorite instruments)
+- Be concise but thorough
+
+**User Preferences (from memory):**
+- Risk Tolerance: {risk_tolerance}
+- Favorite Instruments: {favorite_instruments}
+- Trading Style: {trading_style}
+
+Current Date/Time: {current_time}
+"""
+    
+    async def process_query(self, user_query: str, session_id: str = None) -> Dict[str, Any]:
+        """
+        Process a user query through the multi-agent system.
+        """
+        
+        start_time = datetime.now()
+        
+        # Create or retrieve session
+        if session_id is None:
+            session_id = f"session_{datetime.now().timestamp()}"
+        
+        session = self.session_service.get_or_create(session_id)
+        
+        # Load user preferences from memory
+        # UPDATED: Defaults to NAS100/US30 as requested
+        user_prefs = self.memory_bank.get(session_id) or {
+            "risk_tolerance": "moderate",
+            "favorite_instruments": ["NAS100", "US30", "SPX500"],
+            "trading_style": "intraday_scalping"
+        }
+        
+        logger.info(f"Processing query: '{user_query}' (session: {session_id})")
+        metrics.increment("queries_processed")
+        
+        try:
+            # Update system prompt with user preferences
+            formatted_prompt = self._get_system_prompt().format(
+                risk_tolerance=user_prefs.get("risk_tolerance", "moderate"),
+                favorite_instruments=", ".join(user_prefs.get("favorite_instruments", [])),
+                trading_style=user_prefs.get("trading_style", "intraday"),
+                current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+            
+            # Execute the coordinator agent
+            response = await self.coordinator.run(
+                user_input=user_query,
+                session=session,
+                system_prompt=formatted_prompt
+            )
+            
+            # Calculate execution time
+            execution_time = (datetime.now() - start_time).total_seconds()
+            metrics.record("query_execution_time", execution_time)
+            
+            logger.info(f"✅ Query processed in {execution_time:.2f}s")
+            
+            return {
+                "response": response.content,
+                "session_id": session_id,
+                "execution_time": execution_time,
+                "agents_used": response.metadata.get("agents_used", []),
+                "success": True
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing query: {str(e)}", exc_info=True)
+            metrics.increment("query_errors")
+            
+            return {
+                "response": f"I encountered an error: {str(e)}. Please try again.",
+                "session_id": session_id,
+                "execution_time": (datetime.now() - start_time).total_seconds(),
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def update_preferences(self, session_id: str, preferences: Dict[str, Any]):
+        """Update user preferences in memory."""
+        
+        logger.info(f"Updating preferences for session {session_id}")
+        self.memory_bank.set(session_id, preferences)
+        logger.info("✅ Preferences updated")
+
+
+async def main():
+    """Main entry point for the application."""
+    
+    print("=" * 60)
+    print("🚀 TradeFlow AI - Multi-Agent Trading Analysis System")
+    print("=" * 60)
+    print()
+    
+    # Check for API key
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        print("❌ Error: GOOGLE_API_KEY not found in environment variables")
+        print("Please set it in your .env file")
+        sys.exit(1)
+    
+    # Initialize coordinator
+    coordinator = TradeFlowCoordinator(api_key=api_key)
+    
+    print("✅ System initialized successfully!")
+    print("\nExample queries:")
+    print("  - 'What's the current market sentiment for NASDAQ?'")
+    print("  - 'Calculate position size for US30 with $10k account and 2% risk'")
+    print("  - 'Scan for bullish signals on NAS100'")
+    print("  - 'Analyze the latest news affecting tech stocks'")
+    print("\nType 'exit' to quit\n")
+    
+    session_id = None
+    
+    # Interactive loop
+    while True:
+        try:
+            user_input = input("You: ").strip()
+            
+            if user_input.lower() in ['exit', 'quit', 'q']:
+                print("\n👋 Thank you for using TradeFlow AI!")
+                break
+            
+            if not user_input:
+                continue
+            
+            # Process query
+            print("\n🤔 Processing...")
+            result = await coordinator.process_query(user_input, session_id)
+            
+            # Update session ID for continuity
+            session_id = result["session_id"]
+            
+            # Display response
+            print(f"\n🤖 TradeFlow AI: {result['response']}")
+            print(f"\n⏱️  Response time: {result['execution_time']:.2f}s")
+            
+            if result.get("agents_used"):
+                print(f"🔧 Agents used: {', '.join(result['agents_used'])}")
+            
+            print()
+            
+        except KeyboardInterrupt:
+            print("\n\n👋 Interrupted. Exiting...")
+            break
+        except Exception as e:
+            print(f"\n❌ Error: {str(e)}")
+            logger.error(f"Main loop error: {str(e)}", exc_info=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

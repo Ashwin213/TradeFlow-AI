@@ -1,0 +1,101 @@
+from typing import List, Dict, Any
+from adk import Agent, ParallelAgent
+from adk.models import GeminiModel
+from adk.tools import Tool
+import asyncio
+
+
+class MarketMonitorAgent:
+    """
+    Parallel agent that monitors multiple markets concurrently.
+    
+    Sub-agents run in parallel:
+    1. NASDAQ/US30 Tracker
+    2. Index Monitor (SPX, NDX)
+    3. Volume Analyzer
+    """
+    
+    def __init__(self, model: GeminiModel, tools: List[Tool]):
+        """Initialize the parallel market monitoring agent."""
+        
+        # Create sub-agents for parallel execution
+        self.nasdaq_tracker = Agent(
+            name="NASDAQTracker",
+            model=model,
+            tools=tools,
+            system_prompt="""You track NASDAQ (NAS100/NQ) and US30 futures in real-time.
+            
+Provide:
+- Current price and % change
+- Key support/resistance levels (Daily/4H)
+- Comparison to previous close
+- notable price action (Wicks, Rejections)
+
+Be concise and data-focused."""
+        )
+        
+        self.index_monitor = Agent(
+            name="IndexMonitor",
+            model=model,
+            tools=tools,
+            system_prompt="""You monitor major indices (SPX, NDX, DJI).
+            
+Provide:
+- Current levels and % changes
+- Sector performance
+- Market breadth indicators
+- Correlation analysis
+
+Be concise and comparative."""
+        )
+        
+        self.volume_analyzer = Agent(
+            name="VolumeAnalyzer",
+            model=model,
+            tools=tools,
+            system_prompt="""You analyze trading volume and market activity.
+            
+Provide:
+- Volume vs average
+- Unusual volume spikes
+- Dark pool activity (if available)
+- Market participation levels
+
+Focus on anomalies and significance."""
+        )
+        
+        # Create the parallel agent wrapper
+        self.agent = ParallelAgent(
+            name="MarketMonitor",
+            agents=[
+                self.nasdaq_tracker,
+                self.index_monitor,
+                self.volume_analyzer
+            ],
+            system_prompt="""You coordinate parallel market monitoring across multiple sub-agents.
+            
+Your job is to synthesize their outputs into a coherent market overview."""
+        )
+    
+    async def get_market_snapshot(self) -> Dict[str, Any]:
+        """
+        Get a complete market snapshot by running all sub-agents in parallel.
+        
+        Returns:
+            Dict with market data from all sub-agents
+        """
+        
+        # Run all agents in parallel (this is the key parallel execution)
+        results = await asyncio.gather(
+            self.nasdaq_tracker.run("Get current NASDAQ and US30 futures data"),
+            self.index_monitor.run("Get current index levels and performance"),
+            self.volume_analyzer.run("Analyze current market volume"),
+            return_exceptions=True
+        )
+        
+        return {
+            "nasdaq": results[0].content if not isinstance(results[0], Exception) else "Error",
+            "indices": results[1].content if not isinstance(results[1], Exception) else "Error",
+            "volume": results[2].content if not isinstance(results[2], Exception) else "Error",
+            "timestamp": asyncio.get_event_loop().time()
+        }

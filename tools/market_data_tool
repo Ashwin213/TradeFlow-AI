@@ -1,0 +1,23 @@
+import random
+from typing import Dict, Any
+from adk.tools import Tool
+
+class MarketDataTool(Tool):
+    def __init__(self, api_key: str = None):
+        super().__init__(
+            name="get_market_data",
+            description="Fetches real-time price and volume for a ticker (e.g., NAS100, US30)."
+        )
+
+    def run(self, ticker: str) -> Dict[str, Any]:
+        # Mock data simulation for demonstration
+        base_price = 18500 if "NAS" in ticker.upper() else 34000
+        change = random.uniform(-0.5, 0.5)
+        
+        return {
+            "ticker": ticker,
+            "price": base_price + random.uniform(-50, 50),
+            "change_percent": round(change, 2),
+            "volume": "High" if abs(change) > 0.3 else "Normal",
+            "status": "Market Open"
+        }

@@ -1,0 +1,121 @@
+from typing import List, Dict, Any, Optional
+from adk import Agent, LoopAgent
+from adk.tools import Tool
+
+
+class SignalGeneratorAgent:
+    """
+    Loop agent that iteratively scans for trade signals.
+    
+    Execution pattern:
+    - Loop through technical indicators (RSI, MACD, VWAP, etc.)
+    - Check each for signal confirmation
+    - Continue until high-probability setup found
+    - Max iterations: 10
+    - Stop condition: Confidence > 70%
+    """
+    
+    def __init__(self, tools: List[Tool]):
+        """Initialize the loop-based signal generator."""
+        
+        # Create the scanner agent
+        self.scanner = Agent(
+            name="TechnicalScanner",
+            tools=tools,
+            system_prompt="""You scan for technical trading signals.
+
+**Indicators to check (in order):**
+1. RSI (Relative Strength Index)
+   - Oversold < 30 (bullish)
+   - Overbought > 70 (bearish)
+   
+2. MACD (Moving Average Convergence Divergence)
+   - Bullish crossover
+   - Bearish crossover
+   
+3. VWAP (Volume Weighted Average Price)
+   - Price above VWAP (bullish)
+   - Price below VWAP (bearish)
+   
+4. Moving Averages (20, 50, 200 EMA)
+   - Golden cross / Death cross
+   
+5. Volume Confirmation
+   - Above average volume
+
+**For each iteration:**
+- Check ONE indicator
+- Return signal if found (with confidence %)
+- Return "no signal" to continue to next indicator
+
+**Signal format:**
+{
+  "signal": "BUY" or "SELL" or null,
+  "indicator": "RSI" / "MACD" / "VWAP" / etc,
+  "confidence": 0-100,
+  "entry": price,
+  "stop_loss": price,
+  "target": price,
+  "reason": "Explanation"
+}
+
+Use technical_indicators tool."""
+        )
+        
+        # Create the loop agent wrapper
+        self.agent = LoopAgent(
+            name="SignalGenerator",
+            agent=self.scanner,
+            max_iterations=10,  # Check up to 10 indicators
+            stop_condition=self._check_signal_found,
+            system_prompt="""You continuously scan for high-probability trade setups.
+
+**Loop behavior:**
+- Iterate through technical indicators
+- Stop when confidence > 70%
+- Max 10 iterations
+- Return best signal found
+
+**Output:**
+Comprehensive trade signal with entry, stop, targets, and reasoning."""
+        )
+        
+        self.last_signal = None
+    
+    def _check_signal_found(self, iteration_result: Any) -> bool:
+        """
+        Stop condition: Returns True when high-confidence signal found.
+        """
+        
+        # Extract signal data from result
+        if hasattr(iteration_result, 'metadata'):
+            signal_data = iteration_result.metadata.get('signal', {})
+            confidence = signal_data.get('confidence', 0)
+            
+            # Store signal if found
+            if confidence > 0:
+                self.last_signal = signal_data
+            
+            # Stop if confidence > 70%
+            return confidence >= 70
+        
+        return False
+    
+    def scan_for_signals(self, instrument: str, timeframe: str = "5m") -> Dict[str, Any]:
+        """Scan for trade signals on given instrument."""
+        
+        query = f"""
+        Scan {instrument} on {timeframe} timeframe for trade signals.
+        Check all technical indicators systematically.
+        """
+        
+        # Run loop agent (will iterate until signal found or max iterations)
+        result = self.agent.run(query)
+        
+        return {
+            "instrument": instrument,
+            "timeframe": timeframe,
+            "signal": self.last_signal,
+            "iterations_used": result.metadata.get("iterations", 0),
+            "analysis": result.content
+        }

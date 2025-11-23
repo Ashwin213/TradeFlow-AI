@@ -1,0 +1,65 @@
+import logging
+import time
+from typing import Dict, Any, Optional
+from datetime import datetime
+from collections import defaultdict
+import json
+
+
+class ObservabilityService:
+    """
+    Centralized observability for TradeFlow AI.
+    Features: Structured logging, Performance tracing, Custom metrics.
+    """
+    
+    _loggers: Dict[str, logging.Logger] = {}
+    _metrics: Dict[str, Any] = defaultdict(list)
+    _traces: Dict[str, Dict[str, Any]] = {}
+    
+    @classmethod
+    def get_logger(cls, name: str) -> logging.Logger:
+        """Get or create a structured logger."""
+        
+        if name not in cls._loggers:
+            logger = logging.getLogger(name)
+            logger.setLevel(logging.INFO)
+            
+            # Console handler with formatting
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            
+            # Structured format
+            formatter = logging.Formatter(
+                '%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            console_handler.setFormatter(formatter)
+            
+            logger.addHandler(console_handler)
+            cls._loggers[name] = logger
+        
+        return cls._loggers[name]
+    
+    @classmethod
+    def get_metrics(cls):
+        """Get the metrics collector."""
+        return MetricsCollector(cls._metrics)
+
+
+class MetricsCollector:
+    """Collector for custom metrics."""
+    
+    def __init__(self, metrics_store: Dict[str, Any]):
+        self.store = metrics_store
+    
+    def increment(self, metric_name: str, value: int = 1):
+        """Increment a counter metric."""
+        if metric_name not in self.store:
+            self.store[metric_name] = 0
+        self.store[metric_name] += value
+    
+    def record(self, metric_name: str, value: float):
+        """Record a value for a metric."""
+        if metric_name not in self.store:
+            self.store[metric_name] = []
+        self.store[metric_name].append(value)
