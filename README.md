@@ -2,7 +2,7 @@ TradeFlow AI
 
 An automated market analysis tool built with Google's Agent Development Kit (ADK) and Gemini 2.0 Flash.
 
-Author: [Ashwin213]
+Author: Ashwin213
 Focus: NAS100 & US30 (New York Session)
 
 Why I Built This
